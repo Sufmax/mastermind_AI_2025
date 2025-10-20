@@ -1,83 +1,45 @@
 import tensorflow as tf
-from tensorflow.python.keras.layers import Embedding
-from tensorflow.contrib.rnn import LSTMCell, MultiRNNCell
+from tensorflow.keras.layers import Embedding, Dense, LSTM
 import itertools
-
-import ipdb
-
 import config
 
-
-tf.enable_eager_execution()
-
-
-class Policy:
+class Policy(tf.Module):
     """
-    Our policy. Takes as input the current state as a list of
-    input/feedback indices and outputs the action distribution.
+    Policy for Mastermind using TensorFlow 2.
     """
 
     def __init__(self):
-        self.guess_embedding = Embedding(config.max_guesses + 1, 
+        super().__init__()
+        self.guess_embedding = Embedding(config.max_guesses + 1,
                                          config.guess_embedding_size)
         self.feedback_embedding = Embedding(config.max_feedback + 1,
                                             config.feedback_embedding_size)
-        self.lstm = MultiRNNCell([
-            LSTMCell(config.lstm_hidden_size), 
-            LSTMCell(config.lstm_hidden_size)
-        ])
-
-        self.dense = tf.layers.Dense(config.max_guesses)
+        self.lstm = LSTM(config.lstm_hidden_size, return_state=True, return_sequences=True)
+        self.dense = Dense(config.max_guesses)
 
     @property
     def variables(self):
-        """Return all the trainable parameters"""
-        return [
-            *self.guess_embedding.variables,
-            *self.feedback_embedding.variables,
-            *self.lstm.variables,
-            *self.dense.variables
-        ]
-
-    @property
-    def named_variables(self):
-        """Method to ensure variables across different 'Policy'
-        instances are named consistently"""
-        return dict(zip(map(str, itertools.count()), self.variables))
-
+        return self.guess_embedding.trainable_variables + \
+               self.feedback_embedding.trainable_variables + \
+               self.lstm.trainable_variables + \
+               self.dense.trainable_variables
 
     def __call__(self, game_state, with_softmax=True):
         """
-        Do a forward pass to get the action distribution
+        Forward pass to get action logits
         """
-
-        state = self.lstm.zero_state(1, tf.float32)
-
+        seq = []
         for guess, feedback in game_state:
-            guess_tensor = tf.reshape(tf.convert_to_tensor(guess), (1,))
-            feedback_tensor = tf.reshape(tf.convert_to_tensor(feedback), (1,))
-            guess_embedded = self.guess_embedding(guess_tensor)
-            feedback_embedded = self.feedback_embedding(feedback_tensor)
+            guess_tensor = tf.convert_to_tensor([guess], dtype=tf.int32)
+            feedback_tensor = tf.convert_to_tensor([feedback], dtype=tf.int32)
+            guess_emb = self.guess_embedding(guess_tensor)
+            feedback_emb = self.feedback_embedding(feedback_tensor)
+            combined = tf.concat([guess_emb, feedback_emb], axis=-1)
+            seq.append(combined)
 
-            combined_embedded = tf.concat([guess_embedded,
-                                            feedback_embedded],
-                                            axis=-1)
-            # can I do multiple inputs to the LSTM instead of concatenating?
-
-            output, state = self.lstm(combined_embedded, state)
-
-        logits = self.dense(output)
+        x = tf.stack(seq, axis=1)  # shape (batch=1, time, features)
+        lstm_out, h, c = self.lstm(x)
+        logits = self.dense(lstm_out[:, -1, :])  # last time step
         if with_softmax:
             return tf.nn.softmax(logits)
         return logits
-
-
-if __name__ == "__main__":
-    from episode import Episode
-    import numpy as np
-    np.random.seed(123)
-    p = Policy()
-    e = Episode(p, "0000")
-    x = p(e.generate())
-    print(x.numpy())
-
