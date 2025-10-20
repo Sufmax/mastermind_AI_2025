@@ -1,16 +1,11 @@
 import unittest
 import tensorflow as tf
-import tensorflow.contrib.eager as tfe
 import tempfile
 import os
 import numpy as np
-import ipdb
-import itertools
-
 from policy import Policy
 
-# tf.enable_eager_execution()
-
+tf.random.set_seed(230)
 
 class TestCheckpoints(unittest.TestCase):
 
@@ -18,27 +13,29 @@ class TestCheckpoints(unittest.TestCase):
         pol = Policy()
         episode = [(0, 0), (1, 0), (2, 3)]
         expected = pol(episode).numpy()
+
         with tempfile.TemporaryDirectory() as tdir:
             path = os.path.join(tdir, "checkpt")
 
-            saver = tfe.Saver(pol.named_variables)
-            saver.save(path)
+            # sauvegarde avec tf.train.Checkpoint
+            ckpt = tf.train.Checkpoint(model=pol)
+            ckpt.write(path)
 
+            # créer un nouveau modèle
             pol2 = Policy()
-            def diff():
-                actual = pol2(episode).numpy()
-                return np.linalg.norm(actual-expected)
 
-            self.assertGreater(diff(), 0.0001)
-            saver = tfe.Saver(pol2.named_variables)
-            saver.restore(path)
-            self.assertGreaterEqual(0.00001, diff())
+            # vérifier qu'il est différent avant restore
+            diff_before = np.linalg.norm(pol2(episode).numpy() - expected)
+            self.assertGreater(diff_before, 0.0001)
+
+            # restaurer le checkpoint
+            ckpt2 = tf.train.Checkpoint(model=pol2)
+            ckpt2.read(path).assert_existing_objects_matched()
+
+            # vérifier que la sortie est maintenant identique
+            diff_after = np.linalg.norm(pol2(episode).numpy() - expected)
+            self.assertLessEqual(diff_after, 1e-5)
 
 
 if __name__ == "__main__":
-    tf.set_random_seed(230)
-    assert(tf.executing_eagerly())
-    unittest.main(module='tests')
-    # need to specify 'tests' as the module
-    # since there's a competing 'main' method somewhere
-
+    unittest.main(argv=['first-arg-is-ignored'], exit=False)
