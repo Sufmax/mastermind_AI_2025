@@ -1,4 +1,4 @@
-lstm_hidden_size = 2500
+lstm_hidden_size = 512 
 feedback_embedding_size = 250
 guess_embedding_size = lstm_hidden_size - feedback_embedding_size
 max_guesses = 6**4
