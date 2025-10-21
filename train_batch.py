@@ -164,3 +164,6 @@ def train(num_steps=1000, batch_size=32, save_every=100, checkpoint_dir="checkpo
             print(f"Checkpoint saved at step {step}")
 
     print("Training finished.")
+
+if __name__ == "__main__":
+    interactive_train()
