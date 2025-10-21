@@ -6,6 +6,7 @@ import os
 import argparse
 import config
 from policy import Policy
+from transfer_utils import transfer_weights
 
 # Helpers (secret encoding/decoding)
 def int_to_digits(index):
@@ -63,8 +64,63 @@ def normalize_row_from_digits(guess_digits, color_norm, place_norm):
     row = tf.concat([guess_norm, tf.expand_dims(color_norm,1), tf.expand_dims(place_norm,1)], axis=1)
     return row  # (batch,6)
 
-def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkpoints"):
-    policy = Policy()
+def interactive_train():
+    print("=== 🎯 Entraînement IA Mastermind ===")
+
+    # 1️⃣ Charger un modèle existant
+    ckpt_path = input("➡️  Entrez le chemin du checkpoint à charger (ou laissez vide pour créer un nouveau): ").strip()
+    old_policy = None
+    lstm_size_loaded = None
+
+    if ckpt_path and os.path.exists(ckpt_path):
+        print("Chargement du modèle existant...")
+        try:
+            old_policy = Policy()
+            ckpt = tf.train.Checkpoint(model=old_policy)
+            ckpt.restore(ckpt_path).expect_partial()
+            lstm_size_loaded = old_policy.lstm.units
+            print(f"✅ Modèle chargé avec LSTM de taille {lstm_size_loaded}")
+        except Exception as e:
+            print("⚠️ Impossible de charger le checkpoint :", e)
+    else:
+        print("Aucun checkpoint trouvé, un nouveau modèle sera créé.")
+
+    # 2️⃣ Demander la nouvelle taille LSTM
+    new_size_str = input(f"➡️  Nouvelle taille LSTM (actuelle {lstm_size_loaded or config.lstm_hidden_size}): ").strip()
+    if new_size_str == "":
+        new_size = lstm_size_loaded or config.lstm_hidden_size
+    else:
+        new_size = int(new_size_str)
+
+    # 3️⃣ Créer le nouveau modèle
+    new_policy = Policy(lstm_hidden_size=new_size)
+
+    # 4️⃣ Si un ancien modèle est chargé et la taille diffère → transfert
+    if old_policy and new_size != lstm_size_loaded:
+        print("Transfert des poids vers le nouveau modèle...")
+        transfer_weights(old_policy, new_policy)
+    elif old_policy:
+        print("Taille identique, modèle restauré directement.")
+        new_policy = old_policy
+    else:
+        print("Nouveau modèle initialisé aléatoirement.")
+
+    # 5️⃣ Demander les hyperparamètres
+    def ask(prompt, default, typ):
+        s = input(f"➡️  {prompt} (défaut={default}) : ").strip()
+        return typ(s) if s != "" else default
+
+    num_steps = ask("Nombre d'étapes", 10000, int)
+    batch_size = ask("Taille du batch", 32, int)
+    save_every = ask("Sauvegarde toutes les X étapes", 100, int)
+    checkpoint_dir = input("➡️  Dossier de sauvegarde (défaut=checkpoints): ").strip() or "checkpoints"
+
+    # 6️⃣ Lancer l'entraînement
+    print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
+    train(num_steps=num_steps, batch_size=batch_size, save_every=save_every, checkpoint_dir=checkpoint_dir, policy=new_policy)
+
+def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkpoints", policy=None):
+    policy = policy or Policy()
     optimizer = tf.keras.optimizers.SGD(learning_rate=config.reinforce_alpha)
     ckpt = tf.train.Checkpoint(model=policy, optimizer=optimizer)
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_dir, max_to_keep=5)
@@ -72,102 +128,70 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
     max_len = config.max_episode_length
     eps = 1e-9
 
-    # training loop (each iteration produces one batch of episodes)
     for step in range(1, num_steps + 1):
-        # sample batch of secrets (ints 0..6^4-1)
         secrets = np.random.randint(0, config.max_guesses, size=(batch_size,), dtype=np.int32)
-        secret_digits = batch_ints_to_digits_tensor(secrets)  # (batch,4)
+        secret_digits = batch_ints_to_digits_tensor(secrets)
 
-        # initialize history and masks
         history = tf.zeros((batch_size, max_len, 6), dtype=tf.float32)
         lengths = tf.zeros((batch_size,), dtype=tf.int32)
         done = tf.zeros((batch_size,), dtype=tf.bool)
 
-        # we'll store log_pi per time per batch
-        logpi_ta = tf.TensorArray(tf.float32, size=max_len, dynamic_size=False, infer_shape=True)
-        active_ta = tf.TensorArray(tf.float32, size=max_len, dynamic_size=False, infer_shape=True)
+        logpi_ta = tf.TensorArray(tf.float32, size=max_len)
+        active_ta = tf.TensorArray(tf.float32, size=max_len)
 
         with tf.GradientTape() as tape:
             for t in range(max_len):
-                # mask for policy: ones for positions < current length
-                mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)  # (batch, max_len)
-                # policy expects mask as numeric boolean/int - fine
-                probs = policy(history, mask=mask, with_sigmoid=True)  # (batch,5,4)
+                mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
+                probs = policy(history, mask=mask, with_sigmoid=True)
 
-                # sample bernoulli inside tape (so gradients flow to probs via log_pi)
-                u = tf.random.uniform(shape=tf.shape(probs), minval=0.0, maxval=1.0)
-                bern = tf.cast(u < probs, tf.float32)  # (batch,5,4)
+                u = tf.random.uniform(tf.shape(probs))
+                bern = tf.cast(u < probs, tf.float32)
 
-                # compute log prob
                 p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
-                log_mat = bern * tf.math.log(p_clip) + (1 - bern) * tf.math.log(1 - p_clip)  # (batch,5,4)
-                log_pi = tf.reduce_sum(log_mat, axis=[1,2])  # (batch,)
+                log_mat = bern * tf.math.log(p_clip) + (1 - bern) * tf.math.log(1 - p_clip)
+                log_pi = tf.reduce_sum(log_mat, axis=[1,2])
 
-                # compute guess digits from bern (counts per column)
-                guess_digits = tf.cast(tf.round(tf.reduce_sum(bern, axis=1)), tf.int32)  # (batch,4)
-
-                # compute feedback (color, place)
+                guess_digits = tf.cast(tf.round(tf.reduce_sum(bern, axis=1)), tf.int32)
                 color_raw, place_raw = compute_feedback_batch(secret_digits, guess_digits)
                 color_norm = tf.cast(color_raw, tf.float32) / 4.0
                 place_norm = tf.cast(place_raw, tf.float32) / 4.0
 
-                # reward: -1 for active episodes that are not yet done; 0 for done episodes
                 not_done = tf.logical_not(done)
-                reward = tf.where(not_done, -1.0, 0.0)  # (batch,)
-
-                # mark newly finished episodes where place_raw == 4
+                reward = tf.where(not_done, -1.0, 0.0)
                 newly_done = tf.logical_and(not_done, tf.equal(place_raw, 4))
                 done = tf.logical_or(done, newly_done)
 
-                # update history and lengths only for episodes that were not done (i.e., those that actually played this turn)
-                # we create row for all batches, but only write for those that were not done
-                row = normalize_row_from_digits(guess_digits, color_norm, place_norm)  # (batch,6)
-                # update history at time t: history[:, t, :] = row for those not done
-                # need to convert to tensor updates
-                update_mask = tf.expand_dims(tf.cast(not_done, tf.float32), axis=1)  # (batch,1)
-                row_expanded = tf.expand_dims(row, axis=1)  # (batch,1,6)
+                row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
+                update_mask = tf.expand_dims(tf.cast(not_done, tf.float32), axis=1)
+                row_expanded = tf.expand_dims(row, axis=1)
                 history = tf.concat([
                     history[:, :t, :],
                     tf.where(tf.cast(update_mask[:,:,None], tf.bool), row_expanded, tf.zeros_like(row_expanded)),
                     history[:, t+1:, :]
                 ], axis=1)
 
-                # increment lengths for episodes that were not done
                 lengths += tf.cast(not_done, tf.int32)
 
-                # store log_pi and active mask (1 if not_done else 0) for this timestep
                 logpi_ta = logpi_ta.write(t, log_pi)
                 active_ta = active_ta.write(t, tf.cast(not_done, tf.float32))
 
-                # stop early if all done
                 if tf.reduce_all(done):
-                    # fill remaining time steps with zeros in TA
                     for tt in range(t+1, max_len):
-                        logpi_ta = logpi_ta.write(tt, tf.zeros((batch_size,), dtype=tf.float32))
-                        active_ta = active_ta.write(tt, tf.zeros((batch_size,), dtype=tf.float32))
+                        logpi_ta = logpi_ta.write(tt, tf.zeros((batch_size,)))
+                        active_ta = active_ta.write(tt, tf.zeros((batch_size,)))
                     break
 
-            # stack TAs into (T, batch) -> transpose to (batch, T)
-            logpi_stack = tf.transpose(logpi_ta.stack(), perm=[1,0])   # (batch, T)
-            active_stack = tf.transpose(active_ta.stack(), perm=[1,0]) # (batch, T)
+            logpi_stack = tf.transpose(logpi_ta.stack(), perm=[1,0])
+            active_stack = tf.transpose(active_ta.stack(), perm=[1,0])
 
-            # lengths: actual steps per episode (vector batch)
-            L = tf.cast(lengths, tf.float32)  # (batch,)
+            L = tf.cast(lengths, tf.float32)
             T_actual = tf.shape(logpi_stack)[1]
+            times = tf.cast(tf.range(T_actual), tf.float32)
+            returns = -((tf.expand_dims(L,1) - tf.reshape(times, (1,-1))))
+            returns *= active_stack
 
-            # build returns per batch per time: G_t = -(L - t) for t in [0..T_actual-1], but only where active==1
-            # create times vector t = [0,1,2,...,T_actual-1]
-            times = tf.cast(tf.range(T_actual), tf.float32)  # (T,)
-            # Expand: L[:,None] - times[None,:] -> (batch, T)
-            returns = -( (tf.expand_dims(L,1) - tf.reshape(times, (1,-1))) )  # (batch, T)
-            # For times >= L, should be irrelevant; mask them by active_stack
-            returns = returns * active_stack  # zeroed where inactive
+            loss = tf.reduce_sum(-(returns * logpi_stack) * active_stack) / tf.cast(batch_size, tf.float32)
 
-            # compute loss: - sum_b sum_t G_bt * logpi_bt
-            loss_matrix = - (returns * logpi_stack) * active_stack
-            loss = tf.reduce_sum(loss_matrix) / tf.cast(batch_size, tf.float32)
-
-        # gradients
         grads = tape.gradient(loss, policy.variables)
         optimizer.apply_gradients(zip(grads, policy.variables))
 
@@ -176,6 +200,9 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
 
         if step % save_every == 0 or step == num_steps:
             ckpt_manager.save()
-            print(f"Checkpoint saved at step {step}")
+            print(f"Checkpoint sauvegardé à l'étape {step}")
 
-    print("Training finished.")
+    print("✅ Entraînement terminé.")
+
+if __name__ == "__main__":
+    interactive_train()
