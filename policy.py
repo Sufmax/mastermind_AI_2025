@@ -1,45 +1,46 @@
+# policy.py
 import tensorflow as tf
-from tensorflow.keras.layers import Embedding, Dense, LSTM
-import itertools
+from tensorflow.keras.layers import Dense, LSTM, Masking
 import config
 
 class Policy(tf.Module):
     """
-    Policy for Mastermind using TensorFlow 2.
+    Policy TF2 batch-ready.
+    Input: history tensor (batch, time, 6), mask (batch, time) boolean/int
+    Output: probs (batch, 5, 4) in [0,1]
     """
 
-    def __init__(self):
-        super().__init__()
-        self.guess_embedding = Embedding(config.max_guesses + 1,
-                                         config.guess_embedding_size)
-        self.feedback_embedding = Embedding(config.max_feedback + 1,
-                                            config.feedback_embedding_size)
-        self.lstm = LSTM(config.lstm_hidden_size, return_state=True, return_sequences=True)
-        self.dense = Dense(config.max_guesses)
+    def __init__(self, name=None):
+        super().__init__(name=name)
+        self.masking = Masking(mask_value=0.0)
+        self.lstm = LSTM(config.lstm_hidden_size, return_state=False, return_sequences=False)
+        self.out = Dense(5 * 4)
 
     @property
     def variables(self):
-        return self.guess_embedding.trainable_variables + \
-               self.feedback_embedding.trainable_variables + \
+        return self.masking.trainable_variables + \
                self.lstm.trainable_variables + \
-               self.dense.trainable_variables
+               self.out.trainable_variables
 
-    def __call__(self, game_state, with_softmax=True):
-        """
-        Forward pass to get action logits
-        """
-        seq = []
-        for guess, feedback in game_state:
-            guess_tensor = tf.convert_to_tensor([guess], dtype=tf.int32)
-            feedback_tensor = tf.convert_to_tensor([feedback], dtype=tf.int32)
-            guess_emb = self.guess_embedding(guess_tensor)
-            feedback_emb = self.feedback_embedding(feedback_tensor)
-            combined = tf.concat([guess_emb, feedback_emb], axis=-1)
-            seq.append(combined)
+    def __call__(self, history, mask=None, with_sigmoid=True):
+        # history: (batch, time, features) or (time,features) (we convert)
+        h = tf.convert_to_tensor(history, dtype=tf.float32)
+        if len(h.shape) == 2:
+            h = tf.expand_dims(h, axis=0)  # (1, time, features)
 
-        x = tf.stack(seq, axis=1)  # shape (batch=1, time, features)
-        lstm_out, h, c = self.lstm(x)
-        logits = self.dense(lstm_out[:, -1, :])  # last time step
-        if with_softmax:
-            return tf.nn.softmax(logits)
+        # apply masking layer (it will just pass data but keep shapes)
+        h = self.masking(h)
+
+        # prepare mask for LSTM: boolean (batch, time)
+        if mask is not None:
+            mask_t = tf.cast(mask, tf.bool)
+            lstm_out = self.lstm(h, mask=mask_t)
+        else:
+            lstm_out = self.lstm(h)
+
+        logits = self.out(lstm_out)                 # (batch, 20)
+        logits = tf.reshape(logits, (-1, 5, 4))     # (batch, 5, 4)
+
+        if with_sigmoid:
+            return tf.sigmoid(logits)               # probabilities
         return logits
