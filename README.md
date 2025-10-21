@@ -1,4 +1,4 @@
-# 🎯 MasterMind AI
+# 🎯 MasterMind AI !!!PROJET EN COURS DE CRATION!!!
 
 **MasterMind AI** est un projet Python qui implémente le jeu **MasterMind** avec une intelligence artificielle capable de deviner la combinaison secrète.
 
