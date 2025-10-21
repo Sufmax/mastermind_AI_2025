@@ -7,6 +7,10 @@ import config
 from policy import Policy
 from transfer_utils import transfer_weights
 
+from tensorflow.keras import mixed_precision
+mixed_precision.set_global_policy('mixed_float16')
+
+
 # ---------- helpers (inchangés / légèrement nettoyés) ----------
 def batch_ints_to_digits_tensor(indices):
     indices = tf.cast(indices, tf.int32)
@@ -40,7 +44,7 @@ def normalize_row_from_digits(guess_digits, color_norm, place_norm):
 # ---------- training function corrigée ----------
 def train(num_steps=1000, batch_size=32, save_every=100, checkpoint_dir="checkpoints", policy=None):
     policy = policy or Policy()
-    optimizer = tf.keras.optimizers.SGD(learning_rate=config.reinforce_alpha)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
     ckpt = tf.train.Checkpoint(model=policy, optimizer=optimizer)
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_dir, max_to_keep=5)
 
