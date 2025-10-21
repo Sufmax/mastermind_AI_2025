@@ -1,4 +1,3 @@
-# policy.py
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, LSTM, Masking
 import config
@@ -24,24 +23,17 @@ class Policy(tf.Module):
                self.out.trainable_variables
 
     def __call__(self, history, mask=None, with_sigmoid=True):
-        # history: (batch, time, features) or (time,features) (we convert)
         h = tf.convert_to_tensor(history, dtype=tf.float32)
         if len(h.shape) == 2:
             h = tf.expand_dims(h, axis=0)  # (1, time, features)
-
-        # apply masking layer (it will just pass data but keep shapes)
         h = self.masking(h)
-
-        # prepare mask for LSTM: boolean (batch, time)
         if mask is not None:
             mask_t = tf.cast(mask, tf.bool)
             lstm_out = self.lstm(h, mask=mask_t)
         else:
             lstm_out = self.lstm(h)
-
         logits = self.out(lstm_out)                 # (batch, 20)
         logits = tf.reshape(logits, (-1, 5, 4))     # (batch, 5, 4)
-
         if with_sigmoid:
             return tf.sigmoid(logits)               # probabilities
         return logits
