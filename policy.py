@@ -10,10 +10,11 @@ class Policy(tf.Module):
     Output: probs (batch, 5, 4) in [0,1]
     """
 
-    def __init__(self, name=None):
+    def __init__(self, lstm_hidden_size=None, name=None):
         super().__init__(name=name)
+        hidden_size = lstm_hidden_size or config.lstm_hidden_size
         self.masking = Masking(mask_value=0.0)
-        self.lstm = LSTM(config.lstm_hidden_size, return_state=False, return_sequences=False)
+        self.lstm = LSTM(hidden_size, return_state=False, return_sequences=False)
         self.out = Dense(5 * 4)
 
     @property
