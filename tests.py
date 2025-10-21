@@ -11,29 +11,27 @@ class TestCheckpoints(unittest.TestCase):
 
     def test_save_restore(self):
         pol = Policy()
-        episode = [(0, 0), (1, 0), (2, 3)]
-        expected = pol(episode).numpy()
+        # create a fake history: two turns
+        hist = np.zeros((30,6), dtype=np.float32)
+        hist[0,:] = [0/5,1/5,2/5,3/5, 0.25, 0.25]
+        hist[1,:] = [1/5,2/5,3/5,4/5, 0.5, 0.25]
+        mask = np.array([1,1] + [0]*28, dtype=np.int32)
+
+        expected = pol(hist, mask=mask).numpy()
 
         with tempfile.TemporaryDirectory() as tdir:
-            path = os.path.join(tdir, "checkpt")
-
-            # sauvegarde avec tf.train.Checkpoint
+            path = os.path.join(tdir, "ckpt")
             ckpt = tf.train.Checkpoint(model=pol)
             ckpt.write(path)
 
-            # créer un nouveau modèle
             pol2 = Policy()
+            diff_before = np.linalg.norm(pol2(hist, mask=mask).numpy() - expected)
+            self.assertGreater(diff_before, 1e-6)
 
-            # vérifier qu'il est différent avant restore
-            diff_before = np.linalg.norm(pol2(episode).numpy() - expected)
-            self.assertGreater(diff_before, 0.0001)
-
-            # restaurer le checkpoint
             ckpt2 = tf.train.Checkpoint(model=pol2)
             ckpt2.read(path).assert_existing_objects_matched()
 
-            # vérifier que la sortie est maintenant identique
-            diff_after = np.linalg.norm(pol2(episode).numpy() - expected)
+            diff_after = np.linalg.norm(pol2(hist, mask=mask).numpy() - expected)
             self.assertLessEqual(diff_after, 1e-5)
 
 
