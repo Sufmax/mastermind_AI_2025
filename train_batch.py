@@ -11,6 +11,29 @@ from tensorflow.keras import mixed_precision
 mixed_precision.set_global_policy('mixed_float16')
 
 
+"""
+Au cas où...
+"""
+# Helpers (secret encoding/decoding)
+def int_to_digits(index):
+    # returns list length 4 of ints 0..5
+    digits = []
+    for i in range(4):
+        power = 6 ** (3 - i)
+        d = (index // power) % 6
+        digits.append(d)
+    return digits
+
+def binary_matrix_to_guess_digits_tf(binary):
+    # binary: (batch,5,4) float32 zeros/ones -> sum rows -> (batch,4) ints
+    counts = tf.reduce_sum(binary, axis=1)   # (batch,4)
+    # round to nearest int just in case (should be integer already)
+    return tf.cast(tf.round(counts), tf.int32)
+
+"""
+c'est tout
+"""
+
 # ---------- helpers (inchangés / légèrement nettoyés) ----------
 def batch_ints_to_digits_tensor(indices):
     indices = tf.cast(indices, tf.int32)
@@ -166,4 +189,4 @@ def train(num_steps=1000, batch_size=32, save_every=100, checkpoint_dir="checkpo
     print("Training finished.")
 
 if __name__ == "__main__":
-    interactive_train()
+    train()
