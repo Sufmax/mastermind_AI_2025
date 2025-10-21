@@ -18,6 +18,6 @@
 1. **Cloner le dépôt et se placer sur la branche `new_method`** :
 
 ```bash
-git clone https://github.com/votre-utilisateur/mastermind_ai.git
-cd mastermind_ai
+git clone https://github.com/Sufmax/mastermind_AI_2025.git
+cd mastermind_AI_2025
 git checkout new_method
