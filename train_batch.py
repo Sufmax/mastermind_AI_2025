@@ -157,7 +157,7 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
             returns *= active_stack
 
             # LOSS POSITIVE À MINIMISER
-            loss = tf.reduce_sum((returns * logpi_stack) * active_stack) / tf.cast(batch_size, tf.float32)
+            loss = -tf.reduce_sum((returns * logpi_stack) * active_stack) / tf.cast(batch_size, tf.float32)
 
         grads = tape.gradient(loss, policy.variables)
         optimizer.apply_gradients(zip(grads, policy.variables))
