@@ -61,7 +61,8 @@ class Episode:
 
     @staticmethod
     def binary_matrix_to_guess_digits(binary):
-        counts = np.sum(binary, axis=0)
+        counts = np.sum(binary, axis=0)  # Peut être shape (1,4) ou (4,)
+        counts = np.squeeze(counts)      # <-- AJOUTE CETTE LIGNE
         digits = [int(round(float(c))) for c in counts]
         return digits
 
