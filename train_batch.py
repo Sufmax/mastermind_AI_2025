@@ -69,6 +69,10 @@ def interactive_train():
     new_policy = Policy(lstm_hidden_size=new_size)
 
     if old_policy and new_size != lstm_size_loaded:
+        # Après avoir créé old_policy et new_policy
+        dummy_input = tf.zeros((1, config.max_episode_length, 6), dtype=tf.float32)
+        old_policy(dummy_input)
+        new_policy(dummy_input)
         print("Transfert des poids vers le nouveau modèle...")
         transfer_weights(old_policy, new_policy)
     elif old_policy:
