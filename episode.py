@@ -62,7 +62,7 @@ class Episode:
     @staticmethod
     def binary_matrix_to_guess_digits(binary):
         counts = np.sum(binary, axis=0)
-        digits = [int(int(c)) for c in counts.tolist()]
+        digits = [int(round(float(c))) for c in counts]
         return digits
 
     def generate(self):
