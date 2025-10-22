@@ -21,3 +21,6 @@
 git clone https://github.com/Sufmax/mastermind_AI_2025.git
 cd mastermind_AI_2025
 git checkout new_method
+
+---
+## Une IA pré-entraînée sera bientôt disponible !
