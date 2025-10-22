@@ -70,6 +70,7 @@ class Episode:
         steps = []
         for t in range(self.max_len):
             mask = np.array([1 if i < len(history_rows) else 0 for i in range(self.max_len)], dtype=np.int32)
+            mask = np.expand_dims(mask, axis=0) # CORRIGÉ
             hist = np.zeros((self.max_len, 6), dtype=np.float32)
             if len(history_rows) > 0:
                 hist[:len(history_rows), :] = np.array(history_rows, dtype=np.float32)
