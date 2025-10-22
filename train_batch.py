@@ -114,6 +114,9 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
         active_ta = tf.TensorArray(tf.float32, size=max_len)
 
         with tf.GradientTape() as tape:
+            prev_place_norm = tf.zeros((batch_size,), dtype=tf.float32)
+            prev_color_norm = tf.zeros((batch_size,), dtype=tf.float32)
+            rewards_ta = tf.TensorArray(tf.float32, size=max_len)
             for t in range(max_len):
                 mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
                 probs = policy(history, mask=mask, with_sigmoid=True)
@@ -133,17 +136,29 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
                 not_done = tf.logical_not(done)
                 newly_done = tf.logical_and(not_done, tf.equal(place_raw, 4))
                 done = tf.logical_or(done, newly_done)
-
+                
+                # --- Reward shaping ---
+                # delta_place = place_norm - prev_place_norm
+                # delta_color = color_norm - prev_color_norm
+                delta_place = place_norm - prev_place_norm
+                delta_color = color_norm - prev_color_norm
+                # On ne donne le bonus qu'aux batchs actifs
+                reward = -1.0 + 0.5 * delta_place + 0.2 * delta_color
+                reward = tf.where(not_done, reward, 0.0)
+                rewards_ta = rewards_ta.write(t, reward)
+                
+                # Met à jour prev_* pour le prochain tour
+                prev_place_norm = tf.where(not_done, place_norm, prev_place_norm)
+                prev_color_norm = tf.where(not_done, color_norm, prev_color_norm)
+                
                 row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
-                #assert row.shape[0] == history.shape[0], f"row batch size {row.shape[0]} != history batch size {history.shape[0]}"
-                #assert row.shape[1] == 6, f"row shape {row.shape} n'est pas (batch, 6)"
                 indices_to_update = tf.where(tf.cast(not_done, tf.bool))[:, 0]
                 history = tf.tensor_scatter_nd_update(
                     history, 
                     tf.stack([indices_to_update, tf.cast(tf.fill(tf.shape(indices_to_update), t), dtype=tf.int64)], axis=1), 
                     tf.gather(row, indices_to_update)
                 )
-
+                
                 lengths += tf.cast(not_done, tf.int32)
 
                 logpi_ta = logpi_ta.write(t, log_pi)
@@ -159,7 +174,13 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
             T_actual = tf.shape(logpi_stack)[1]
             times = tf.cast(tf.range(T_actual), tf.float32)
             # returns = -(L - t - 1)
-            returns = -((tf.expand_dims(L,1) - tf.reshape(times, (1,-1)) - 1))
+            ##returns = -((tf.expand_dims(L,1) - tf.reshape(times, (1,-1)) - 1))
+            ##returns *= active_stack
+
+            # rewards_stack: (batch, max_len)
+            rewards_stack = tf.transpose(rewards_ta.stack(), perm=[1,0])  # (batch, max_len)
+            
+            returns = tf.reverse(tf.math.cumsum(tf.reverse(rewards_stack, axis=[1]), axis=1), axis=[1])
             returns *= active_stack
 
             # LOSS POSITIVE À MINIMISER
