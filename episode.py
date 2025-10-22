@@ -78,13 +78,14 @@ class Episode:
             mask = np.expand_dims(mask, axis=0)  # (1, max_len)
             hist = np.zeros((self.max_len, 6), dtype=np.float32)
             if len(history_rows) > 0:
-                # Vérification de la forme de chaque ligne
                 for i, row in enumerate(history_rows):
                     if len(row) != 6:
                         raise ValueError(f"Ligne d'historique malformée à l'index {i}: {row} (len={len(row)})")
                 hist[:len(history_rows), :] = np.array(history_rows, dtype=np.float32)
             probs = self.policy(hist, mask=mask, with_sigmoid=True).numpy()
             binary, log_prob = self._sample_binary_matrix(probs)
+            if binary.ndim == 3 and binary.shape[0] == 1:
+                binary = binary[0]
             guess_digits = self.binary_matrix_to_guess_digits(binary)
             if len(guess_digits) != 4:
                 raise ValueError(f"guess_digits malformé : {guess_digits} (len={len(guess_digits)})")
