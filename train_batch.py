@@ -91,7 +91,7 @@ def interactive_train():
 
 def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkpoints", policy=None):
     policy = policy or Policy()
-    optimizer = tf.keras.optimizers.SGD(learning_rate=config.reinforce_alpha)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=config.reinforce_alpha) #AVANT: optimizer = tf.keras.optimizers.SGD(learning_rate=config.reinforce_alpha)
     ckpt = tf.train.Checkpoint(model=policy, optimizer=optimizer)
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_dir, max_to_keep=5)
 
@@ -131,6 +131,8 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
                 done = tf.logical_or(done, newly_done)
 
                 row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
+                #assert row.shape[0] == history.shape[0], f"row batch size {row.shape[0]} != history batch size {history.shape[0]}"
+                #assert row.shape[1] == 6, f"row shape {row.shape} n'est pas (batch, 6)"
                 indices_to_update = tf.where(tf.cast(not_done, tf.bool))[:, 0]
                 history = tf.tensor_scatter_nd_update(
                     history, 
@@ -163,7 +165,7 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
         optimizer.apply_gradients(zip(grads, policy.variables))
 
         if step % 10 == 0:
-            print(f"Step {step}/{num_steps} loss={loss.numpy():.4f} avg_length={tf.reduce_mean(L).numpy():.2f}")
+            print(f"Step {step}/{num_steps} loss={-loss.numpy():.4f} avg_length={tf.reduce_mean(L).numpy():.2f}")
 
         if step % save_every == 0 or step == num_steps:
             ckpt_manager.save()
