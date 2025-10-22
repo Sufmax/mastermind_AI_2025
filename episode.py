@@ -61,14 +61,13 @@ class Episode:
 
     @staticmethod
     def binary_matrix_to_guess_digits(binary):
+        # binary: shape (5,4) or (5,4) with possible extra batch dim
         counts = np.sum(binary, axis=0)
         counts = np.array(counts).flatten()
-        digits = []
-        for c in counts:
-            # Si c est un array de taille 1, on prend la valeur scalaire
-            if isinstance(c, (np.ndarray, list)) and np.size(c) == 1:
-                c = float(np.array(c).item())
-            digits.append(int(round(float(c))))
+        # Force à 4 éléments, sinon erreur explicite
+        if len(counts) != 4:
+            raise ValueError(f"counts malformé : {counts} (len={len(counts)})")
+        digits = [int(round(float(c))) for c in counts]
         return digits
 
     def generate(self):
@@ -76,13 +75,19 @@ class Episode:
         steps = []
         for t in range(self.max_len):
             mask = np.array([1 if i < len(history_rows) else 0 for i in range(self.max_len)], dtype=np.int32)
-            mask = np.expand_dims(mask, axis=0) # CORRIGÉ
+            mask = np.expand_dims(mask, axis=0)  # (1, max_len)
             hist = np.zeros((self.max_len, 6), dtype=np.float32)
             if len(history_rows) > 0:
+                # Vérification de la forme de chaque ligne
+                for i, row in enumerate(history_rows):
+                    if len(row) != 6:
+                        raise ValueError(f"Ligne d'historique malformée à l'index {i}: {row} (len={len(row)})")
                 hist[:len(history_rows), :] = np.array(history_rows, dtype=np.float32)
             probs = self.policy(hist, mask=mask, with_sigmoid=True).numpy()
             binary, log_prob = self._sample_binary_matrix(probs)
             guess_digits = self.binary_matrix_to_guess_digits(binary)
+            if len(guess_digits) != 4:
+                raise ValueError(f"guess_digits malformé : {guess_digits} (len={len(guess_digits)})")
             guess_index = self.digits_to_index(guess_digits)
             color_norm, place_norm, (color_raw, place_raw) = self.compute_feedback(self._secret_digits, guess_digits)
             step = {
@@ -94,6 +99,8 @@ class Episode:
             }
             steps.append(step)
             row = [d / 5.0 for d in guess_digits] + [color_norm, place_norm]
+            if len(row) != 6:
+                raise ValueError(f"Row malformée : {row} (len={len(row)})")
             history_rows.append(row)
             if place_raw == 4:
                 break
