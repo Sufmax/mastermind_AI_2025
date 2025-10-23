@@ -60,9 +60,8 @@ class Episode:
             binary = np.squeeze(binary, axis=0)
         counts = np.sum(binary, axis=0)
         return [int(round(c)) for c in counts]
-
+    
     def generate(self):
-        """Génère un épisode complet, tour par tour."""
         history_rows = []
         steps = []
         for _ in range(self.max_len):
@@ -76,7 +75,8 @@ class Episode:
             hist_batch = np.expand_dims(hist, axis=0)
             mask_batch = np.expand_dims(mask, axis=0)
 
-            probs = self.policy(hist_batch, mask=mask_batch, with_sigmoid=True).numpy()
+            # === MODIFICATION DE L'APPEL AU MODÈLE ===
+            probs = self.policy((hist_batch, mask_batch), with_sigmoid=True).numpy()
             
             binary, log_prob = self._sample_binary_matrix(probs)
             guess_digits = self.binary_matrix_to_guess_digits(binary)
