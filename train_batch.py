@@ -95,7 +95,16 @@ def interactive_train():
     nbr_step_debug = ask("Afficher toutes les ... step le débug", 10, int)
 
     print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
-    train(num_steps=num_steps, batch_size=batch_size, save_every=save_every, nbr_step_debug, checkpoint_dir=checkpoint_dir, policy=new_policy, reinforce_alpha=reinforce_alpha)
+    print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
+    train(
+        num_steps=num_steps,
+        batch_size=batch_size,
+        save_every=save_every,
+        nbr_step_debug=nbr_step_debug,
+        checkpoint_dir=checkpoint_dir,
+        policy=new_policy,
+        reinforce_alpha=reinforce_alpha
+    )
 
 def train(num_steps=10000, batch_size=32, save_every=100, nbr_step_debug=10, checkpoint_dir="checkpoints", policy=None, reinforce_alpha=config.reinforce_alpha):
     assert batch_size > 0
