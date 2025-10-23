@@ -66,7 +66,8 @@ class Episode:
             mask[:len(history_rows)] = 1
             hist_batch = np.expand_dims(hist, axis=0)
             mask_batch = np.expand_dims(mask, axis=0)
-            probs = self.policy(hist_batch, mask=mask_batch, with_sigmoid=True).numpy()
+            # Appel du modèle avec tuple (history, mask)
+            probs = self.policy((hist_batch, mask_batch), with_sigmoid=True).numpy()
             binary, log_prob = self._sample_binary_matrix(probs)
             guess_digits = self.binary_matrix_to_guess_digits(binary)
             color_norm, place_norm, (color_raw, place_raw) = self.compute_feedback(self._secret_digits, guess_digits)
