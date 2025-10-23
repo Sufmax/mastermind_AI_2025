@@ -15,7 +15,7 @@
 - Méthode 2.1: La plus lente mais plus sûre
 - Méthode 2.2: La plus rapide, l'IA est plus "guidée" dans ces choix, mais léger risque de Reward Hacking.
 
-##Si vous avez du temps et que vous voulez entraîner l'IA de la manière la plus "sûre" possible, je vous conseil la méthode 2.1
+## Si vous avez du temps et que vous voulez entraîner l'IA de la manière la plus "sûre" possible, je vous conseil la méthode 2.1
 
 ---
 
