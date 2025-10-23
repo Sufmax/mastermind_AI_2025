@@ -28,7 +28,7 @@
 ```bash
 git clone https://github.com/Sufmax/mastermind_AI_2025.git
 cd mastermind_AI_2025
-git checkout new_method_v2
+git checkout new_method_v2.2
 ```
 
 ---
