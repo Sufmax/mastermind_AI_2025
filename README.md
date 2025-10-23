@@ -11,6 +11,14 @@
 - Interface simple en console
 - Support des combinaisons de longueur personnalisable
 
+## Méthode: 2.2
+- Plus rapide que la méthode 2.1
+- Moins "sûre" que la méthode 2.1, mais beaucoup plus rapide
+- Le but de l'IA: faire des coups plus logiques entre eux
+- L'IA est évaluée tour par tour, comparé à la méthode 2.1 où elle ne l'es qu'une fois tous les épisodes.
+
+##Si vous avez du temps et que vous voulez entraîner l'IA de la manière la plus "sûre" possible, je vous conseil la méthode 2.1
+
 ---
 
 ## 🛠️ Installation
