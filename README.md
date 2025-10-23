@@ -4,7 +4,7 @@
 
 ---
 
-## Méthode: 2.1
+## Méthode: 2.1 POUR CPU UNIQUEMENT
 - Cette méthode est plus lente, donc l'IA aura du mal à comprendre le but du jeu au départ
 - Mais est la méthode la plus "sûre" car ne risque pas de faire Reward Hacking
 - Son but: trouver la solution avec le moins de coups possibles
