@@ -15,11 +15,13 @@ def int_to_digits(index):
     return digits
 
 def batch_ints_to_digits_tensor(indices):
-    indices = tf.cast(indices, tf.int32)
-    return tf.map_fn(lambda x: tf.stack([ (x // (6**3)) % 6,
-                                          (x // (6**2)) % 6,
-                                          (x // (6**1)) % 6,
-                                          (x // (6**0)) % 6 ]), indices, dtype=tf.int32)
+    indices = np.array(indices).astype(np.int32)
+    digits = np.zeros((len(indices), 4), dtype=np.int32)
+    for i, idx in enumerate(indices):
+        for j in range(4):
+            power = 6 ** (3 - j)
+            digits[i, j] = (idx // power) % 6
+    return tf.convert_to_tensor(digits, dtype=tf.int32)
 
 def binary_matrix_to_guess_digits_tf(binary):
     counts = tf.reduce_sum(binary, axis=1)
@@ -89,13 +91,14 @@ def interactive_train():
     batch_size = ask("Taille du batch", 32, int)
     save_every = ask("Sauvegarde toutes les X étapes", 100, int)
     checkpoint_dir = input("➡️  Dossier de sauvegarde (défaut=checkpoints): ").strip() or "checkpoints"
+    reinforce_alpha= ask("Le learning rate (plus c'est bas, plus c'est précis)", config.reinforce_alpha, float)
 
     print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
-    train(num_steps=num_steps, batch_size=batch_size, save_every=save_every, checkpoint_dir=checkpoint_dir, policy=new_policy)
+    train(num_steps=num_steps, batch_size=batch_size, save_every=save_every, checkpoint_dir=checkpoint_dir, policy=new_policy, reinforce_alpha=reinforce_alpha)
 
-def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkpoints", policy=None):
+def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkpoints", policy=None, reinforce_alpha=config.reinforce_alpha):
     policy = policy or Policy()
-    optimizer = tf.keras.optimizers.Adam(learning_rate=config.reinforce_alpha) #AVANT: optimizer = tf.keras.optimizers.SGD(learning_rate=config.reinforce_alpha)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=reinforce_alpha) #AVANT: optimizer = tf.keras.optimizers.SGD(learning_rate=reinforce_alpha)
     ckpt = tf.train.Checkpoint(model=policy, optimizer=optimizer)
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_dir, max_to_keep=5)
 
@@ -121,11 +124,12 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
                 mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
                 probs = policy(history, mask=mask, with_sigmoid=True)
 
-                u = tf.random.uniform(tf.shape(probs))
-                bern = tf.cast(u < probs, tf.float32)
 
                 p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
+                u = tf.random.uniform(tf.shape(probs))
+                bern = tf.cast(u < p_clip, tf.float32)
                 log_mat = bern * tf.math.log(p_clip) + (1 - bern) * tf.math.log(1 - p_clip)
+                
                 log_pi = tf.reduce_sum(log_mat, axis=[1,2])
 
                 guess_digits = tf.cast(tf.round(tf.reduce_sum(bern, axis=1)), tf.int32)
@@ -144,6 +148,7 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
                 delta_color = color_norm - prev_color_norm
                 # On ne donne le bonus qu'aux batchs actifs
                 reward = -1.0 + 0.5 * delta_place + 0.2 * delta_color
+                reward = tf.clip_by_value(reward, -1.0, 1.0)
                 reward = tf.where(not_done, reward, 0.0)
                 rewards_ta = rewards_ta.write(t, reward)
                 
@@ -185,6 +190,10 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
 
             # LOSS POSITIVE À MINIMISER
             loss = -tf.reduce_sum((returns * logpi_stack) * active_stack) / tf.cast(batch_size, tf.float32)
+
+            if tf.math.reduce_any(tf.math.is_nan(loss)):
+                print("\nNaN detected in loss! Stopping training.\n")
+                return
 
         grads = tape.gradient(loss, policy.variables)
         optimizer.apply_gradients(zip(grads, policy.variables))
