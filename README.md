@@ -9,7 +9,7 @@
 - Mais est la méthode la plus "sûre" car ne risque pas de faire Reward Hacking
 - Son but: trouver la solution avec le moins de coups possibles
 
-## Si vous souhaitez entraîner l'IA plus rapidement, je vous conseil la méthode 2 
+## Si vous souhaitez entraîner l'IA plus rapidement, je vous conseil la méthode 2.2
 
 ## 🔹 Fonctionnalités
 
