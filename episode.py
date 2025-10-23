@@ -13,13 +13,12 @@ class Episode:
             assert 0 <= secret < config.max_guesses
             s = []
             idx = secret
-            for i in range(4):
+            for _ in range(4):
                 s.append(str(idx % 6))
                 idx //= 6
-            s = "".join(reversed(s)).zfill(4)
-            return [int(ch) for ch in s]
+            return [int(ch) for ch in "".join(reversed(s)).zfill(4)]
         if isinstance(secret, str):
-            assert len(secret) == 4
+            assert len(secret) == 4 and all(c in "012345" for c in secret)
             return [int(c) for c in secret]
         if isinstance(secret, (list, tuple, np.ndarray)):
             assert len(secret) == 4
@@ -34,21 +33,12 @@ class Episode:
         return index
 
     @staticmethod
-    def index_to_digits(index):
-        digits = []
-        for i in range(4):
-            power = 6 ** (3 - i)
-            digits.append((index // power) % 6)
-        return digits
-
-    @staticmethod
     def compute_feedback(secret_digits, guess_digits):
         place = sum(int(s == g) for s, g in zip(secret_digits, guess_digits))
         secret_counts = [secret_digits.count(i) for i in range(6)]
         guess_counts = [guess_digits.count(i) for i in range(6)]
-        common = sum(min(secret_counts[i], guess_counts[i]) for i in range(6))
-        color = common
-        return color / 4.0, place / 4.0, (color, place)
+        common = sum(min(sc, gc) for sc, gc in zip(secret_counts, guess_counts))
+        return common / 4.0, place / 4.0, (common, place)
 
     @staticmethod
     def _sample_binary_matrix(probs):
@@ -56,55 +46,39 @@ class Episode:
         eps = 1e-9
         p = np.clip(probs, eps, 1 - eps)
         log_prob_matrix = bern * np.log(p) + (1 - bern) * np.log(1 - p)
-        log_prob = float(np.sum(log_prob_matrix))
-        return bern, log_prob
+        return bern, float(np.sum(log_prob_matrix))
 
     @staticmethod
     def binary_matrix_to_guess_digits(binary):
-        # binary: shape (5,4) or (5,4) with possible extra batch dim
+        if binary.ndim == 3:
+            binary = np.squeeze(binary, axis=0)
         counts = np.sum(binary, axis=0)
-        counts = np.array(counts).flatten()
-        # Force à 4 éléments, sinon erreur explicite
-        if len(counts) != 4:
-            raise ValueError(f"counts malformé : {counts} (len={len(counts)})")
-        digits = [int(round(float(c))) for c in counts]
-        return digits
+        return [int(round(c)) for c in counts]
 
     def generate(self):
         history_rows = []
         steps = []
-        for t in range(self.max_len):
-            mask = np.array([1 if i < len(history_rows) else 0 for i in range(self.max_len)], dtype=np.int32)
-            mask = np.expand_dims(mask, axis=0)  # (1, max_len)
+        for _ in range(self.max_len):
             hist = np.zeros((self.max_len, 6), dtype=np.float32)
-            if len(history_rows) > 0:
-                for i, row in enumerate(history_rows):
-                    if len(row) != 6:
-                        raise ValueError(f"Ligne d'historique malformée à l'index {i}: {row} (len={len(row)})")
+            if history_rows:
                 hist[:len(history_rows), :] = np.array(history_rows, dtype=np.float32)
-            probs = self.policy(hist, mask=mask, with_sigmoid=True).numpy()
+            mask = np.zeros((self.max_len,), dtype=np.int32)
+            mask[:len(history_rows)] = 1
+            hist_batch = np.expand_dims(hist, axis=0)
+            mask_batch = np.expand_dims(mask, axis=0)
+            probs = self.policy(hist_batch, mask=mask_batch, with_sigmoid=True).numpy()
             binary, log_prob = self._sample_binary_matrix(probs)
-            if binary.ndim == 3 and binary.shape[0] == 1:
-                binary = binary[0]
             guess_digits = self.binary_matrix_to_guess_digits(binary)
-            if len(guess_digits) != 4:
-                raise ValueError(f"guess_digits malformé : {guess_digits} (len={len(guess_digits)})")
-            guess_index = self.digits_to_index(guess_digits)
             color_norm, place_norm, (color_raw, place_raw) = self.compute_feedback(self._secret_digits, guess_digits)
-            step = {
+            steps.append({
                 'guess_digits': guess_digits,
-                'guess_index': guess_index,
+                'guess_index': self.digits_to_index(guess_digits),
                 'feedback_color': color_norm,
                 'feedback_place': place_norm,
                 'log_prob': log_prob
-            }
-            steps.append(step)
+            })
             row = [d / 5.0 for d in guess_digits] + [color_norm, place_norm]
-            if len(row) != 6:
-                raise ValueError(f"Row malformée : {row} (len={len(row)})")
             history_rows.append(row)
             if place_raw == 4:
-                break
-            if len(history_rows) >= self.max_len:
                 break
         return steps
