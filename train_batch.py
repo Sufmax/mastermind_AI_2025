@@ -92,13 +92,16 @@ def interactive_train():
     save_every = ask("Sauvegarde toutes les X étapes", 100, int)
     checkpoint_dir = input("➡️  Dossier de sauvegarde (défaut=checkpoints): ").strip() or "checkpoints"
     reinforce_alpha= ask("Le learning rate (plus c'est bas, plus c'est précis)", config.reinforce_alpha, float)
+    nbr_step_debug = ask("Afficher toutes les ... step le débug", 10, int)
 
     print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
-    train(num_steps=num_steps, batch_size=batch_size, save_every=save_every, checkpoint_dir=checkpoint_dir, policy=new_policy, reinforce_alpha=reinforce_alpha)
+    train(num_steps=num_steps, batch_size=batch_size, save_every=save_every, nbr_step_debug, checkpoint_dir=checkpoint_dir, policy=new_policy, reinforce_alpha=reinforce_alpha)
 
-def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkpoints", policy=None, reinforce_alpha=config.reinforce_alpha):
+def train(num_steps=10000, batch_size=32, save_every=100, nbr_step_debug=10, checkpoint_dir="checkpoints", policy=None, reinforce_alpha=config.reinforce_alpha):
+    assert batch_size > 0
+    assert reinforce_alpha > 0
     policy = policy or Policy()
-    optimizer = tf.keras.optimizers.Adam(learning_rate=reinforce_alpha) #AVANT: optimizer = tf.keras.optimizers.SGD(learning_rate=reinforce_alpha)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=reinforce_alpha)
     ckpt = tf.train.Checkpoint(model=policy, optimizer=optimizer)
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_dir, max_to_keep=5)
 
@@ -106,8 +109,15 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
     eps = 1e-9
 
     for step in range(1, num_steps + 1):
+        # Génère les secrets et les décode en digits (vectorisé, rapide)
         secrets = np.random.randint(0, config.max_guesses, size=(batch_size,), dtype=np.int32)
-        secret_digits = batch_ints_to_digits_tensor(secrets)
+        indices = np.array(secrets).astype(np.int32)
+        digits = np.zeros((len(indices), 4), dtype=np.int32)
+        for i, idx in enumerate(indices):
+            for j in range(4):
+                power = 6 ** (3 - j)
+                digits[i, j] = (idx // power) % 6
+        secret_digits = tf.convert_to_tensor(digits, dtype=tf.int32)
 
         history = tf.zeros((batch_size, max_len, 6), dtype=tf.float32)
         lengths = tf.zeros((batch_size,), dtype=tf.int32)
@@ -115,21 +125,19 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
 
         logpi_ta = tf.TensorArray(tf.float32, size=max_len)
         active_ta = tf.TensorArray(tf.float32, size=max_len)
+        rewards_ta = tf.TensorArray(tf.float32, size=max_len)
 
         with tf.GradientTape() as tape:
             prev_place_norm = tf.zeros((batch_size,), dtype=tf.float32)
             prev_color_norm = tf.zeros((batch_size,), dtype=tf.float32)
-            rewards_ta = tf.TensorArray(tf.float32, size=max_len)
             for t in range(max_len):
                 mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
                 probs = policy(history, mask=mask, with_sigmoid=True)
-
 
                 p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
                 u = tf.random.uniform(tf.shape(probs))
                 bern = tf.cast(u < p_clip, tf.float32)
                 log_mat = bern * tf.math.log(p_clip) + (1 - bern) * tf.math.log(1 - p_clip)
-                
                 log_pi = tf.reduce_sum(log_mat, axis=[1,2])
 
                 guess_digits = tf.cast(tf.round(tf.reduce_sum(bern, axis=1)), tf.int32)
@@ -140,22 +148,18 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
                 not_done = tf.logical_not(done)
                 newly_done = tf.logical_and(not_done, tf.equal(place_raw, 4))
                 done = tf.logical_or(done, newly_done)
-                
+
                 # --- Reward shaping ---
-                # delta_place = place_norm - prev_place_norm
-                # delta_color = color_norm - prev_color_norm
                 delta_place = place_norm - prev_place_norm
                 delta_color = color_norm - prev_color_norm
-                # On ne donne le bonus qu'aux batchs actifs
                 reward = -1.0 + 0.5 * delta_place + 0.2 * delta_color
                 reward = tf.clip_by_value(reward, -1.0, 1.0)
                 reward = tf.where(not_done, reward, 0.0)
                 rewards_ta = rewards_ta.write(t, reward)
-                
-                # Met à jour prev_* pour le prochain tour
+
                 prev_place_norm = tf.where(not_done, place_norm, prev_place_norm)
                 prev_color_norm = tf.where(not_done, color_norm, prev_color_norm)
-                
+
                 row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
                 indices_to_update = tf.where(tf.cast(not_done, tf.bool))[:, 0]
                 history = tf.tensor_scatter_nd_update(
@@ -163,9 +167,8 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
                     tf.stack([indices_to_update, tf.cast(tf.fill(tf.shape(indices_to_update), t), dtype=tf.int64)], axis=1), 
                     tf.gather(row, indices_to_update)
                 )
-                
-                lengths += tf.cast(not_done, tf.int32)
 
+                lengths += tf.cast(not_done, tf.int32)
                 logpi_ta = logpi_ta.write(t, log_pi)
                 active_ta = active_ta.write(t, tf.cast(not_done, tf.float32))
 
@@ -174,22 +177,18 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
 
             logpi_stack = tf.transpose(logpi_ta.stack(), perm=[1,0])
             active_stack = tf.transpose(active_ta.stack(), perm=[1,0])
-
-            L = tf.cast(lengths, tf.float32)
-            T_actual = tf.shape(logpi_stack)[1]
-            times = tf.cast(tf.range(T_actual), tf.float32)
-            # returns = -(L - t - 1)
-            ##returns = -((tf.expand_dims(L,1) - tf.reshape(times, (1,-1)) - 1))
-            ##returns *= active_stack
-
-            # rewards_stack: (batch, max_len)
             rewards_stack = tf.transpose(rewards_ta.stack(), perm=[1,0])  # (batch, max_len)
-            
+
+            # Returns = somme cumulée inversée des rewards shaping
             returns = tf.reverse(tf.math.cumsum(tf.reverse(rewards_stack, axis=[1]), axis=1), axis=[1])
             returns *= active_stack
 
-            # LOSS POSITIVE À MINIMISER
+            # Calcul de la loss REINFORCE
             loss = -tf.reduce_sum((returns * logpi_stack) * active_stack) / tf.cast(batch_size, tf.float32)
+
+            # Moyenne des rewards par tour et par épisode
+            avg_reward_per_step = tf.reduce_sum(rewards_stack) / tf.cast(tf.size(rewards_stack), tf.float32)
+            avg_reward_per_episode = tf.reduce_mean(tf.reduce_sum(rewards_stack, axis=1))
 
             if tf.math.reduce_any(tf.math.is_nan(loss)):
                 print("\nNaN detected in loss! Stopping training.\n")
@@ -198,8 +197,9 @@ def train(num_steps=10000, batch_size=32, save_every=100, checkpoint_dir="checkp
         grads = tape.gradient(loss, policy.variables)
         optimizer.apply_gradients(zip(grads, policy.variables))
 
-        if step % 10 == 0:
-            print(f"Step {step}/{num_steps} loss={-loss.numpy():.4f} avg_length={tf.reduce_mean(L).numpy():.2f}")
+        if step % nbr_step_debug == 0:
+            print(f"Step {step}/{num_steps} loss={-loss.numpy():.4f} avg_length={tf.reduce_mean(lengths).numpy():.2f} "
+                  f"avg_reward/step={avg_reward_per_step.numpy():.4f} avg_reward/episode={avg_reward_per_episode.numpy():.4f}")
 
         if step % save_every == 0 or step == num_steps:
             ckpt_manager.save()
