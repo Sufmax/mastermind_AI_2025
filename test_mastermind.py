@@ -6,23 +6,23 @@ from policy import Policy
 from episode import Episode
 
 def load_policy_from_checkpoint(ckpt_dir, ckpt_num):
-    # Compose les chemins des fichiers
     base = os.path.join(ckpt_dir, f"ckpt-{ckpt_num}")
-    data_file = base + ".data-00000-of-00001"
     index_file = base + ".index"
-    if not (os.path.exists(data_file) and os.path.exists(index_file)):
-        print(f"❌ Fichiers de checkpoint non trouvés :\n  {data_file}\n  {index_file}")
+    if not os.path.exists(index_file):
+        print(f"❌ Fichier de checkpoint non trouvé : {index_file}")
         return None
 
-    # Crée une instance de Policy et charge les poids
     policy = Policy()
-    # Appel fictif pour construire les poids
-    policy(tf.zeros((1, config.max_episode_length, 6)))
+    # Appel fictif pour construire le modèle
+    dummy_input = (tf.zeros((1, config.max_episode_length, 6)), None)
+    _ = policy(dummy_input)
+
     ckpt = tf.train.Checkpoint(model=policy)
     status = ckpt.restore(base)
-    status.expect_partial()
+    status.expect_partial() # Permet de ne pas avoir d'erreur si l'optimiseur n'est pas restauré
     print(f"✅ Checkpoint chargé depuis {base}")
     return policy
+
 
 def print_policy_info(policy):
     print("=== Infos sur le modèle chargé ===")
