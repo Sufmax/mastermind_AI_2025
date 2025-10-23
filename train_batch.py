@@ -1,6 +1,13 @@
-import tensorflow as tf
-import numpy as np
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU only
+
+import tensorflow as tf
+import multiprocessing
+n_cpu = multiprocessing.cpu_count()
+tf.config.threading.set_intra_op_parallelism_threads(n_cpu)
+tf.config.threading.set_inter_op_parallelism_threads(n_cpu)
+
+import numpy as np
 import config
 from policy import Policy
 from transfer_utils import transfer_weights
@@ -92,6 +99,7 @@ def interactive_train():
         learning_rate=learning_rate
     )
 
+@tf.function
 def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoint_dir="checkpoints", policy=None, learning_rate=config.reinforce_alpha):
     policy = policy or Policy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
