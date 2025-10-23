@@ -95,7 +95,6 @@ def interactive_train():
     nbr_step_debug = ask("Afficher toutes les ... step le débug", 10, int)
 
     print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
-    print(f"\n🚀 Démarrage de l'entraînement ({num_steps} étapes, batch={batch_size})\n")
     train(
         num_steps=num_steps,
         batch_size=batch_size,
