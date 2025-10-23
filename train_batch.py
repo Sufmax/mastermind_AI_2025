@@ -1,11 +1,13 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force CPU only
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import tensorflow as tf
 import multiprocessing
 n_cpu = multiprocessing.cpu_count()
 tf.config.threading.set_intra_op_parallelism_threads(n_cpu)
 tf.config.threading.set_inter_op_parallelism_threads(n_cpu)
+tf.config.optimizer.set_jit(True)
 
 import numpy as np
 import config
