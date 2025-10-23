@@ -32,15 +32,19 @@ def normalize_row_from_digits(guess_digits, color_norm, place_norm):
 
 def interactive_train():
     print("=== 🎯 Entraînement IA Mastermind ===")
-
     ckpt_path = input("➡️  Chemin du checkpoint (laisser vide pour un nouveau modèle): ").strip()
     old_policy, lstm_size_loaded = None, None
 
+    # Correction : accepte chemin sans extension .index
+    if ckpt_path.endswith(".index"):
+        ckpt_path = ckpt_path[:-6]
     if ckpt_path and os.path.exists(ckpt_path + ".index"):
         print("Chargement du modèle existant...")
         try:
             old_policy = Policy()
-            old_policy(tf.zeros((1, 1, 6)))
+            # Build le modèle pour charger les poids
+            dummy_input = (tf.zeros((1, config.max_episode_length, 6)), tf.ones((1, config.max_episode_length), dtype=tf.int32))
+            _ = old_policy(dummy_input)
             ckpt = tf.train.Checkpoint(model=old_policy)
             ckpt.restore(ckpt_path).expect_partial()
             lstm_size_loaded = old_policy.lstm.units
@@ -52,9 +56,10 @@ def interactive_train():
 
     new_size_str = input(f"➡️  Nouvelle taille LSTM (actuelle {lstm_size_loaded or config.lstm_hidden_size}): ").strip()
     new_size = int(new_size_str) if new_size_str else (lstm_size_loaded or config.lstm_hidden_size)
-
     new_policy = Policy(lstm_hidden_size=new_size)
-    new_policy(tf.zeros((1, 1, 6)))
+    # Build le modèle pour pouvoir transférer les poids
+    dummy_input = (tf.zeros((1, config.max_episode_length, 6)), tf.ones((1, config.max_episode_length), dtype=tf.int32))
+    _ = new_policy(dummy_input)
 
     if old_policy and new_size != lstm_size_loaded:
         print("Transfert des poids vers le nouveau modèle...")
@@ -110,7 +115,7 @@ def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoi
         with tf.GradientTape() as tape:
             for t in range(max_len):
                 mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
-                probs = policy(history, mask=mask, with_sigmoid=True)
+                probs = policy((history, mask), with_sigmoid=True)
 
                 p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
                 u = tf.random.uniform(tf.shape(p_clip))
@@ -149,9 +154,7 @@ def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoi
             T_actual = tf.shape(logpi_stack)[1]
             times = tf.cast(tf.range(T_actual), tf.float32)
 
-            # RETOUR À LA FORMULE SIMPLE ET PURE : returns = -(L - t - 1)
             returns = -(tf.expand_dims(L, 1) - tf.reshape(times, (1, -1)) - 1.0)
-
             loss_per_step = returns * logpi_stack
             loss = -tf.reduce_sum(loss_per_step * active_stack) / tf.cast(batch_size, tf.float32)
 
