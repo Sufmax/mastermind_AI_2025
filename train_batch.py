@@ -4,6 +4,16 @@ import os
 import config
 from policy import Policy
 from transfer_utils import transfer_weights
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, False)
+            tf.config.experimental.set_virtual_device_configuration(
+                gpu,
+                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=13500)]) # 13.5 Go = 90% de 15 Go #Remplacez par la limite de vôtre GPU
+    except RuntimeError as e:
+        print(e)
 
 # --- Fonctions Helper (inchangées) ---
 def batch_ints_to_digits_tensor(indices):
