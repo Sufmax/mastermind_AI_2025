@@ -17,7 +17,7 @@
 - Le but de l'IA: faire des coups plus logiques entre eux
 - L'IA est évaluée tour par tour, comparé à la méthode 2.1 où elle ne l'es qu'une fois tous les épisodes.
 
-##Si vous avez du temps et que vous voulez entraîner l'IA de la manière la plus "sûre" possible, je vous conseil la méthode 2.1
+## Si vous avez du temps et que vous voulez entraîner l'IA de la manière la plus "sûre" possible, je vous conseil la méthode 2.1
 
 ---
 
