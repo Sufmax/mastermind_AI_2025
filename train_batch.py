@@ -1,5 +1,5 @@
 import tensorflow as tf
-tf.config.optimizer.set_jit(True)
+#tf.config.optimizer.set_jit(True)
 
 import numpy as np
 import os
