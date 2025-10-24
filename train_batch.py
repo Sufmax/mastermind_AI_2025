@@ -144,10 +144,15 @@ def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoi
 
                 row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
                 indices_to_update = tf.where(not_done)
-                history = tf.tensor_scatter_nd_update(
-                    history,
-                    tf.stack([indices_to_update[:, 0], tf.cast(tf.fill(tf.shape(indices_to_update)[0], t), dtype=tf.int64)], axis=1),
-                    tf.gather_nd(row, indices_to_update)
+                num_updates = tf.shape(indices_to_update)[0]
+                history = tf.cond(
+                    num_updates > 0,
+                    lambda: tf.tensor_scatter_nd_update(
+                        history,
+                        tf.stack([indices_to_update[:, 0], tf.cast(tf.fill([num_updates], t), dtype=tf.int64)], axis=1),
+                        tf.gather_nd(row, indices_to_update)
+                    ),
+                    lambda: history
                 )
 
                 lengths += tf.cast(not_done, tf.int32)
