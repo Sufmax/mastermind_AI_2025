@@ -5,7 +5,6 @@ import numpy as np
 import os
 import config
 from policy import Policy
-from transfer_utils import transfer_weights
 
 def batch_ints_to_digits_tensor(indices):
     indices = tf.cast(indices, tf.int32)
@@ -37,37 +36,35 @@ def interactive_train():
     ckpt_path = input("➡️  Chemin du checkpoint (laisser vide pour un nouveau modèle): ").strip()
     old_policy, lstm_size_loaded = None, None
 
-    # Correction : accepte chemin sans extension .index
     if ckpt_path.endswith(".index"):
         ckpt_path = ckpt_path[:-6]
     if ckpt_path and os.path.exists(ckpt_path + ".index"):
         print("Chargement du modèle existant...")
         try:
             old_policy = Policy()
-            # Build le modèle pour charger les poids
             dummy_input = (tf.zeros((1, config.max_episode_length, 6)), tf.ones((1, config.max_episode_length), dtype=tf.int32))
             _ = old_policy(dummy_input)
             ckpt = tf.train.Checkpoint(model=old_policy)
             ckpt.restore(ckpt_path).expect_partial()
             lstm_size_loaded = old_policy.lstm.units
             print(f"✅ Modèle chargé avec LSTM de taille {lstm_size_loaded}")
+            new_size = lstm_size_loaded
         except Exception as e:
             print(f"⚠️ Impossible de charger le checkpoint : {e}")
+            old_policy = None
     else:
         print("Aucun checkpoint trouvé, un nouveau modèle sera créé.")
-
-    new_size_str = input(f"➡️  Nouvelle taille LSTM (actuelle {lstm_size_loaded or config.lstm_hidden_size}): ").strip()
-    new_size = int(new_size_str) if new_size_str else (lstm_size_loaded or config.lstm_hidden_size)
+        
+        new_size_str = input(f"➡️  Taille du nouveau LSTM (actuelle {lstm_size_loaded or config.lstm_hidden_size}): ").strip()
+        new_size = int(new_size_str) if new_size_str else (lstm_size_loaded or config.lstm_hidden_size)
+    
     new_policy = Policy(lstm_hidden_size=new_size)
-    # Build le modèle pour pouvoir transférer les poids
+        
     dummy_input = (tf.zeros((1, config.max_episode_length, 6)), tf.ones((1, config.max_episode_length), dtype=tf.int32))
     _ = new_policy(dummy_input)
 
-    if old_policy and new_size != lstm_size_loaded:
-        print("Transfert des poids vers le nouveau modèle...")
-        transfer_weights(old_policy, new_policy)
-    elif old_policy:
-        print("Taille identique, modèle restauré directement.")
+    if old_policy:
+        print("Modèle restauré !")
         new_policy.set_weights(old_policy.get_weights())
     else:
         print("Nouveau modèle initialisé aléatoirement.")
