@@ -4,10 +4,11 @@
 
 ---
 
-## Méthode: 2.1
+## Méthode: 2.1.1
 - Cette méthode est plus lente, donc l'IA aura du mal à comprendre le but du jeu au départ
 - Mais est la méthode la plus "sûre" car ne risque pas de faire Reward Hacking
 - Son but: trouver la solution avec le moins de coups possibles
+- Pourquoi 2.1.1 ? Car dans cette méthode, l'IA a PLUSIEURS couches de neurones cachées, contrairement à toutes les autres versions (pour le moment)
 
 ## Si vous souhaitez entraîner l'IA plus rapidement, je vous conseil la méthode 2.2
 
@@ -27,7 +28,7 @@
 ```bash
 git clone https://github.com/Sufmax/mastermind_AI_2025.git
 cd mastermind_AI_2025
-git checkout new_method_v2.1
+git checkout new_method_v2.1.1
 ```
 
 ---
