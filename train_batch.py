@@ -101,93 +101,89 @@ def interactive_train():
         learning_rate=learning_rate
     )
 
+
 @tf.function
+def train_step(policy, optimizer, secrets, batch_size, max_len, eps):
+    secret_digits = batch_ints_to_digits_tensor(secrets)
+    history = tf.zeros((batch_size, max_len, 6), dtype=tf.float32)
+    lengths = tf.zeros((batch_size,), dtype=tf.int32)
+    done = tf.zeros((batch_size,), dtype=tf.bool)
+    logpi_ta = tf.TensorArray(tf.float32, size=max_len)
+    active_ta = tf.TensorArray(tf.float32, size=max_len)
+
+    def cond(t, history, lengths, done, logpi_ta, active_ta):
+        return tf.logical_and(t < max_len, tf.logical_not(tf.reduce_all(done)))
+
+    def body(t, history, lengths, done, logpi_ta, active_ta):
+        mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
+        probs = policy((history, mask), with_sigmoid=True)
+        p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
+        u = tf.random.uniform(tf.shape(p_clip))
+        bern = tf.cast(u < p_clip, tf.float32)
+        log_mat = bern * tf.math.log(p_clip) + (1.0 - bern) * tf.math.log(1.0 - p_clip)
+        log_pi = tf.reduce_sum(log_mat, axis=[1, 2])
+        guess_digits = binary_matrix_to_guess_digits_tf(bern)
+        color_raw, place_raw = compute_feedback_batch(secret_digits, guess_digits)
+        color_norm = tf.cast(color_raw, tf.float32) / 4.0
+        place_norm = tf.cast(place_raw, tf.float32) / 4.0
+        not_done = tf.logical_not(done)
+        newly_done = tf.logical_and(not_done, tf.equal(place_raw, 4))
+        done = tf.logical_or(done, newly_done)
+        row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
+        indices_to_update = tf.where(not_done)
+        num_updates = tf.shape(indices_to_update)[0]
+        history = tf.cond(
+            num_updates > 0,
+            lambda: tf.tensor_scatter_nd_update(
+                history,
+                tf.stack([indices_to_update[:, 0], tf.cast(tf.fill([num_updates], t), dtype=tf.int64)], axis=1),
+                tf.gather_nd(row, indices_to_update)
+            ),
+            lambda: history
+        )
+        lengths += tf.cast(not_done, tf.int32)
+        logpi_ta = logpi_ta.write(t, log_pi)
+        active_ta = active_ta.write(t, tf.cast(not_done, tf.float32))
+        return t+1, history, lengths, done, logpi_ta, active_ta
+
+    t0 = tf.constant(0)
+    t, history, lengths, done, logpi_ta, active_ta = tf.while_loop(
+        cond,
+        body,
+        [t0, history, lengths, done, logpi_ta, active_ta],
+        maximum_iterations=max_len
+    )
+
+    logpi_stack = tf.transpose(logpi_ta.stack(), perm=[1, 0])
+    active_stack = tf.transpose(active_ta.stack(), perm=[1, 0])
+    L = tf.cast(lengths, tf.float32)
+    T_actual = tf.shape(logpi_stack)[1]
+    times = tf.cast(tf.range(T_actual), tf.float32)
+    returns = -(tf.expand_dims(L, 1) - tf.reshape(times, (1, -1)) - 1.0)
+    loss_per_step = returns * logpi_stack
+    loss = -tf.reduce_sum(loss_per_step * active_stack) / tf.cast(batch_size, tf.float32)
+    return loss, lengths
+
 def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoint_dir="checkpoints", policy=None, learning_rate=config.reinforce_alpha):
     policy = policy or Policy()
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     ckpt = tf.train.Checkpoint(model=policy, optimizer=optimizer)
     ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_dir, max_to_keep=5)
-
     max_len = config.max_episode_length
     eps = 1e-9
 
     for step in range(1, num_steps + 1):
         secrets = np.random.randint(0, config.max_guesses, size=(batch_size,), dtype=np.int32)
-        secret_digits = batch_ints_to_digits_tensor(secrets)
-
-        history = tf.zeros((batch_size, max_len, 6), dtype=tf.float32)
-        lengths = tf.zeros((batch_size,), dtype=tf.int32)
-        done = tf.zeros((batch_size,), dtype=tf.bool)
-
-        logpi_ta = tf.TensorArray(tf.float32, size=max_len)
-        active_ta = tf.TensorArray(tf.float32, size=max_len)
-
-        with tf.GradientTape() as tape:
-            for t in range(max_len):
-                mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
-                probs = policy((history, mask), with_sigmoid=True)
-
-                p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
-                u = tf.random.uniform(tf.shape(p_clip))
-                bern = tf.cast(u < p_clip, tf.float32)
-                log_mat = bern * tf.math.log(p_clip) + (1.0 - bern) * tf.math.log(1.0 - p_clip)
-                log_pi = tf.reduce_sum(log_mat, axis=[1, 2])
-
-                guess_digits = binary_matrix_to_guess_digits_tf(bern)
-                color_raw, place_raw = compute_feedback_batch(secret_digits, guess_digits)
-                color_norm = tf.cast(color_raw, tf.float32) / 4.0
-                place_norm = tf.cast(place_raw, tf.float32) / 4.0
-
-                not_done = tf.logical_not(done)
-                newly_done = tf.logical_and(not_done, tf.equal(place_raw, 4))
-                done = tf.logical_or(done, newly_done)
-
-                row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
-                indices_to_update = tf.where(not_done)
-                num_updates = tf.shape(indices_to_update)[0]
-                history = tf.cond(
-                    num_updates > 0,
-                    lambda: tf.tensor_scatter_nd_update(
-                        history,
-                        tf.stack([indices_to_update[:, 0], tf.cast(tf.fill([num_updates], t), dtype=tf.int64)], axis=1),
-                        tf.gather_nd(row, indices_to_update)
-                    ),
-                    lambda: history
-                )
-
-                lengths += tf.cast(not_done, tf.int32)
-                logpi_ta = logpi_ta.write(t, log_pi)
-                active_ta = active_ta.write(t, tf.cast(not_done, tf.float32))
-
-                if tf.reduce_all(done):
-                    break
-
-            logpi_stack = tf.transpose(logpi_ta.stack(), perm=[1, 0])
-            active_stack = tf.transpose(active_ta.stack(), perm=[1, 0])
-
-            L = tf.cast(lengths, tf.float32)
-            T_actual = tf.shape(logpi_stack)[1]
-            times = tf.cast(tf.range(T_actual), tf.float32)
-
-            returns = -(tf.expand_dims(L, 1) - tf.reshape(times, (1, -1)) - 1.0)
-            loss_per_step = returns * logpi_stack
-            loss = -tf.reduce_sum(loss_per_step * active_stack) / tf.cast(batch_size, tf.float32)
-
-            if tf.math.reduce_any(tf.math.is_nan(loss)):
-                print("\nNaN détecté dans la loss ! Arrêt de l'entraînement.\n")
-                return
-
-        grads = tape.gradient(loss, policy.trainable_variables)
-        optimizer.apply_gradients(zip(grads, policy.trainable_variables))
-
+        loss, lengths = train_step(policy, optimizer, secrets, batch_size, max_len, eps)
+        if tf.math.reduce_any(tf.math.is_nan(loss)):
+            print("\nNaN détecté dans la loss ! Arrêt de l'entraînement.\n")
+            return
         if step % log_every == 0:
             avg_len = tf.reduce_mean(tf.cast(lengths, tf.float32))
             print(f"Step {step}/{num_steps} loss={-loss.numpy():.4f} avg_length={avg_len.numpy():.2f}")
-
         if step % save_every == 0 or step == num_steps:
             save_path = ckpt_manager.save()
             print(f"Checkpoint sauvegardé à l'étape {step} : {save_path}")
-
     print("✅ Entraînement terminé.")
 
 if __name__ == "__main__":
