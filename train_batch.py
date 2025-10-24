@@ -116,22 +116,39 @@ def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoi
             for t in range(max_len):
                 mask = tf.sequence_mask(lengths, maxlen=max_len, dtype=tf.int32)
                 probs = policy((history, mask), with_sigmoid=True)
-
+            
                 p_clip = tf.clip_by_value(probs, eps, 1.0 - eps)
                 u = tf.random.uniform(tf.shape(p_clip))
                 bern = tf.cast(u < p_clip, tf.float32)
                 log_mat = bern * tf.math.log(p_clip) + (1.0 - bern) * tf.math.log(1.0 - p_clip)
                 log_pi = tf.reduce_sum(log_mat, axis=[1, 2])
-
+            
                 guess_digits = binary_matrix_to_guess_digits_tf(bern)
                 color_raw, place_raw = compute_feedback_batch(secret_digits, guess_digits)
                 color_norm = tf.cast(color_raw, tf.float32) / 4.0
                 place_norm = tf.cast(place_raw, tf.float32) / 4.0
-
+            
                 not_done = tf.logical_not(done)
                 newly_done = tf.logical_and(not_done, tf.equal(place_raw, 4))
                 done = tf.logical_or(done, newly_done)
-
+            
+                # --- BONUS TERMINAL ---
+                # Bonus maximal si trouvée tôt, plus faible si trouvée tard
+                # Exemple : bonus = max_len - lengths (avant incrémentation)
+                bonus = tf.where(newly_done, tf.cast(max_len - lengths, tf.float32), 0.0)
+                reward = -1.0 + bonus
+            
+                # (Optionnel) Pour un bonus "doux" au début :
+                # bonus = tf.where(newly_done, 1.0 + (tf.cast(max_len - lengths, tf.float32) / max_len), 0.0)
+                # reward = -1.0 + bonus
+            
+                # (Optionnel) Pour un bonus "punitif" plus tard :
+                # bonus = tf.where(newly_done, tf.maximum(0.0, 10.0 - tf.cast(lengths, tf.float32)), 0.0)
+                # reward = -1.0 + bonus
+            
+                # Stocke le reward dans un TensorArray si tu veux monitorer
+                # rewards_ta = rewards_ta.write(t, reward)
+            
                 row = normalize_row_from_digits(guess_digits, color_norm, place_norm)
                 indices_to_update = tf.where(not_done)
                 history = tf.tensor_scatter_nd_update(
@@ -139,11 +156,11 @@ def train(num_steps=10000, batch_size=32, save_every=100, log_every=10, checkpoi
                     tf.stack([indices_to_update[:, 0], tf.cast(tf.fill(tf.shape(indices_to_update)[0], t), dtype=tf.int64)], axis=1),
                     tf.gather_nd(row, indices_to_update)
                 )
-
+            
                 lengths += tf.cast(not_done, tf.int32)
                 logpi_ta = logpi_ta.write(t, log_pi)
                 active_ta = active_ta.write(t, tf.cast(not_done, tf.float32))
-
+            
                 if tf.reduce_all(done):
                     break
 
